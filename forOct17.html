@@ -1,0 +1,394 @@
+<html>
+<body>
+<script src = "mxlInterpreter.js"></script>
+<script>
+const NOTES = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
+const NOTESALTERNATE = ["B#", "Db", "D", "D#", "Fb", "E#", "Gb", "G", "G#", "A", "A#", "Cb"];
+
+//Type Ordering: 6, 7, 9, 11, 13, 69, M, m, _BLANK
+const hARRAY = [[], [0,3, 6, 10], [0,3,6,10,2], [], [], [], [], [], []];
+const majARRAY = [[0,4,7,9], [0,4,7,11], [0,4,7,11,2], [0,4,7,11,2,5], [0,4,7,11,2,9], [0,2,4,7,9], [0,4,7], [], []];
+const minARRAY = [[0,3,7,9], [0,3,7,10], [0,3,7,10,2], [0,3,7,10,2,5], [0,3,7,10,2,5,9], [0,2,3,7,9], [], [0,3,7], []];
+const oARRAY = [[], [0,3,6,9], [0,3,6,9,2], [], [], [], [], [], [0,3,6]];
+const augARRAY = [[], [0,4,8,10], [0,4,8,10,2], [0,4,8,10,2,5], [0,4,8,10,2,9], [0,2,4,8,9], [0,4,8], [], [0,4,8]];
+const sARRAY = [[0,5,7,9], [0,5,7,10], [0,5,7,10,2], [0,5,7,10,2], [0,5,7,10,2,9], [], [], [], []];
+const domARRAY = [[0,4,7,9], [0,4,7,10], [0,4,7,10,2], [0,4,7,10,2,5], [0,4,7,10,2,9], [0,2,4,7,9], [], [], []];
+const mMARRAY = [[], [0,3,7,11], [0,3,7,11,2], [0,3,7,11,2,5], [0,3,7,11,2,9], [], [], [], []];
+
+//determines which notes to remove if there are more than 4. Remove root, then fifth,|Shouldn't get past this point, but just in case| then 11, then 3, then 2, then 
+const REMOVEINTERPRET4 = [0,7,5,4,3,6,1,2];
+
+let RMELODYGENERATORLAST = -1;
+let RMELODYGENERATORLASTOCTAVE = -1;
+let RMELODYGENERATORD = -1;
+let RMELODYGENERATORJUMP = false;
+//Works for the following chord notation: [Root][Quality: M,m,h,o][Extension: 7,9,11,13][Alteration: #11, b9, #5]
+//Returns an array of symbols(individual pieces) in a given chord notation. 
+function getSymbols(chord){
+	let symbols = [];
+	let alteration = false;
+	for(let i = 0; i< chord.length; i++){
+		a = false;
+		if(i == 0){
+			if(chord[i+1] == "#" || chord[i+1] == "b"){
+				symbols.push(chord[i]+chord[i+1]);
+				i++;
+			}else{
+				symbols.push(chord[i]);
+			}
+		}else{
+			let out = "";
+			if(chord[i] == "1"){
+				out+= chord[i] + chord[i+1];
+				i++;
+			}
+			else if(i!= chord.length-1 && chord[i] == "m" && chord[i+1] == "M"){
+				out = "mM"
+				i++;
+			}
+			else if(i!= chord.length-1 && chord[i] == "6" && chord[i+1] == "9"){
+				out = "69";
+				i++;
+			}
+			else{
+				if(chord[i] == "#" || chord[i] == "b"){
+					a = true;
+				}
+				out = chord[i];
+			}
+			
+			if(alteration){
+				symbols[symbols.length-1] += out;
+				alteration = false;
+			}else{
+				symbols.push(out);
+			}
+			
+			if(a){
+				alteration = true;
+			}
+		}
+	}
+	return symbols;
+}
+//successfully finds a note given a note name. Does not account for octave. Feed it a note like C#, Db, Eb, etc. and it'll spit out a number 0-11 representing it's distance from C.
+function findNote(note){
+	for(let i =0; i<NOTES.length; i++){
+		if(note == NOTES[i]){
+			return i;
+		}
+	}
+	for(let i =0; i<NOTESALTERNATE.length; i++){
+		if(note == NOTESALTERNATE[i]){
+			return i;
+		}
+	}
+	return -1;
+}
+
+
+//successfully produces a 4 part array, in the format of [[(part4)Note,Octave,Duration],[],[],[]]. Not as effecient as it could be, but it works. It needs work with m11 chords. 
+
+function interpret4(note, chord){
+	let symbols = getSymbols(chord);
+	let melody = findNote(note[0]);
+	let octave = note[1];
+	let root = findNote(symbols[0]);
+	let quality = symbols[1];
+	let type = -1;
+	let alterations = [];
+	let duration = note[2];
+	
+	//try and get a type. 
+	if(symbols.length > 2){
+		if(!(symbols[2][0] == "#" || symbols[2][0] == "b")){
+			type = symbols[2];
+		}else{
+			alterations.push(symbols[2]);
+		}
+	}
+	
+	//Get the rest of the alterations. 
+	let i = 3;
+	while(i<symbols.length){
+		alterations.push(symbols[i]);
+		i++;
+	}
+	//For chords like CM, CM#11, D7
+	if(type == -1){
+		type = quality;
+	}
+	//possible qualities: M, m, s, h, o, mM, +
+	//Possible types: 6, 7, 9, 11, 13, 69, M, m, _BLANK
+	
+	let index = -1;
+	if(type == 6){
+		index = 0;
+	}else if(type == 7){
+		index = 1;
+	}else if(type == 9){
+		index = 2;
+	}else if(type == 11){
+		index = 3;
+	}else if(type == 13){
+		index = 4;
+	}else if(type == 69){
+		index = 5;
+	}else if(type == "M"){
+		index = 6;
+	}else if(type == "m"){
+		index = 7;
+	}else{
+		index = 8;
+	}
+	
+	let pitches;
+	if(quality == "M"){
+		pitches = majARRAY[index];
+	}
+	else if(quality == "m"){
+		pitches = minARRAY[index];
+	}
+	else if(quality == "s"){
+		pitches = sARRAY[index];
+	}
+	else if(quality == "h"){
+		pitches = hARRAY[index];
+	}
+	else if(quality == "o"){
+		pitches = oARRAY[index];
+	}
+	else if(quality == "mM"){
+		pitches = mMARRAY[index];
+	}
+	else if(quality == "+"){
+		pitches = augARRAY[index];
+	}
+	else{
+		pitches = domARRAY[index];
+	}
+	
+	//Alteration rules are a bit unique to 4 part, things like #11 will just be treated as b5.
+	for(let i = 0; i< alterations.length; i++){
+		if(alterations[i] == "b5" || alterations[i] == "#11"){
+			for(let i = 0;i< pitches.length; i++){
+				if(pitches[i]%12 == 7){
+					pitches[i]-= 1;
+				}
+			}
+		}
+		if(alterations[i] == "#5"){
+			for(let i = 0;i< pitches.length; i++){
+				if(pitches[i]%12 == 7){
+					pitches[i]+= 1;
+				}
+			}
+		}
+		if(alterations[i] == "b9"){
+			let found = false;
+			for(let i = 0;i< pitches.length; i++){
+				if(pitches[i]%12 == 2){
+					pitches[i]-= 1;
+					found = true;
+				}
+			}
+			if(!found){
+				pitches.push(13);
+			}
+		}
+		if(alterations[i] == "#9"){
+			let found = false;
+			for(let i = 0;i< pitches.length; i++){
+				if(pitches[i]%12 == 2){
+					pitches[i]+= 1;
+					found = true;
+				}
+			}
+			if(!found){
+				pitches.push(15);
+			}
+		}
+		if(alterations[i] == "b13"){
+			let found = false;
+			for(let i = 0;i< pitches.length; i++){
+				if(pitches[i]%12 == 9){
+					pitches[i]-= 1;
+					found = true;
+				}
+			}
+			if(!found){
+				pitches.push(20);
+			}
+		}
+	}
+	
+	let nMelody = (melody-root+12)%12;
+	
+	for(let i = 0; i< pitches.length; i++){
+		if(pitches[i]>nMelody){
+			pitches[i]-=12;
+		}
+	}
+	
+	pitches.sort(function(a,b){return a - b});
+	
+	if(pitches[pitches.length-1] != nMelody){
+		pitches.push(nMelody);
+	}
+	
+	let j = 0;
+	while(pitches.length > 4){
+		for(let i = 0; i< pitches.length; i++){
+			if((pitches[i]+12)%12 == REMOVEINTERPRET4[j]){
+				pitches.splice(i,1);
+				break;
+			}
+		}
+		j++;
+	}
+	
+	for(let i = 0; i< pitches.length; i++){
+		pitches[i] += root;
+		let oc = octave;
+		if((pitches[i]+12)%12 > melody){
+			oc--;
+			pitches[i] = (pitches[i] + 12)%12;
+		}
+		pitches[i] = [NOTES[pitches[i]%12], oc, duration];
+		
+	}
+	let temp = [];
+	for(let i = 0; i< pitches.length; i++){
+		if(pitches[i][1] == octave -1){
+			temp.push(pitches[i]);
+			pitches.splice(i,1);
+			i--;
+		}
+	}
+	
+	temp.sort(function(a,b){return a[0] - b[0]});
+	pitches.sort(function(a,b){return a[0] - b[0]});
+	
+	pitches = [...temp, ...pitches];
+	
+	if(pitches.length<4){
+		pitches = [[pitches[pitches.length-1][0],pitches[pitches.length-1][1]-1,pitches[pitches.length-1][2]], ... pitches];
+	}
+	
+	console.log(pitches);
+	return pitches;
+}
+
+
+function interpret6from4(note, chord){
+	
+}
+
+//Generate a random melody. Pass it in 2 arguments, which are high and low in the form of [note, octave, ...optional], [||]
+function randomMelodyGenerator(low, high){
+	let lowNote = findNote(low[0]);
+	let highNote = findNote(high[0]);
+	let lowOctave = low[1];
+	let highOctave = high[1];
+	
+	//Either step, third, or leap. 
+	let determine = Math.random();
+	let step;
+	
+	if(RMELODYGENERATORLAST == -1 && RMELODYGENERATORLASTOCTAVE == -1){
+		RMELODYGENERATORLAST = Math.floor(Math.random()*12);
+		RMELODYGENERATORLASTOCTAVE = Math.floor((highOctave - lowOctave)/2 + lowOctave);
+	}else{
+	
+		if(determine < .7){
+			step = Math.floor(Math.random()*4 + 1);
+			RMELODYGENERATORJUMP = false;
+		}else{
+			step = Math.floor(Math.random()*7 + 5);
+			RMELODYGENERATORJUMP = true;
+			RMELODYGENERATORD *= -1;
+		}
+		
+		RMELODYGENERATORLAST += step*RMELODYGENERATORD;
+		if(RMELODYGENERATORLAST >= 12){
+			RMELODYGENERATORLASTOCTAVE += 1;
+			RMELODYGENERATORLAST = RMELODYGENERATORLAST%12;
+		}
+		if(RMELODYGENERATORLAST < 0){
+			RMELODYGENERATORLASTOCTAVE -= 1;
+			RMELODYGENERATORLAST += 12;
+		}
+	}
+	if(RMELODYGENERATORLAST >= highNote && RMELODYGENERATORLASTOCTAVE >= highOctave){
+		RMELODYGENERATORLAST = highNote;
+		RMELODYGENERATORD = -1;
+		RMELODYGENERATORLASTOCTAVE = highOctave;
+	}
+	if(RMELODYGENERATORLAST <= lowNote && RMELODYGENERATORLASTOCTAVE <= lowOctave){
+		RMELODYGENERATORLAST = lowNote;
+		RMELODYGENERATORD = 1;
+		RMELODYGENERATORLASTOCTAVE = lowOctave;
+	}
+	
+	return [NOTES[RMELODYGENERATORLAST], RMELODYGENERATORLASTOCTAVE];
+	
+}
+
+function download(fn, txt){
+	var pom = document.createElement('a');
+	var bb = new Blob([txt], {type: 'text/plain'});
+
+	pom.setAttribute('href', window.URL.createObjectURL(bb));
+	pom.setAttribute('download', fn);
+
+	pom.dataset.downloadurl = ['text/plain', pom.download, pom.href].join(':');
+	pom.draggable = true; 
+	pom.classList.add('dragout');
+
+	pom.click();
+}
+
+
+let song = [[[]],[[]],[[]],[[]]];
+
+let result = "";
+
+let measure = 0;
+
+let note = "";
+let chord = "";
+while(true){
+
+	//This can be turned into a function to be used by the program later. 
+	ans = prompt("COMMANDS: exit, r(num), m, (note,octave,duration,chord)");
+	if(ans.toLowerCase() == "exit"){
+		break;
+	}
+	else if(ans[0].toLowerCase() == "r"){
+		for(let i = 0; i<song.length; i++){
+			song[i][measure].push(["R", 5, ans.substring(1,ans.length)]);
+		}
+	}else if(ans.toLowerCase() == "m"){
+		measure++;
+		for(let i = 0; i<song.length; i++){
+			song[i].push([]);
+		}
+	}
+	else{
+		ans = ans.split(",");
+		if(ans.length < 4){
+			continue;
+		}
+		result = interpret4([ans[0],parseInt(ans[1]),parseInt(ans[2])], ans[3]);
+		let j = result.length -1;
+		for(let i = 0; i< result.length; i++){
+			song[i][measure].push(result[j]);
+			j--;
+		}
+	}
+}
+download("music.musicxml", generateMXL(song, [0,4,4]));
+
+</script>
+</body>
+</html>
